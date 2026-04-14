@@ -2,14 +2,17 @@
  * Package registry — defines which packages are compared and where to find
  * their type files.
  *
+ * Firebase JS SDK types are resolved at runtime from the installed `firebase`
+ * npm package (see `resolveFirebaseTypes`). No manual type snapshots are needed.
+ *
  * To add a new package:
- *  1. Create .github/scripts/compare-types/packages/<name>/firebase-sdk.d.ts
- *     with the public types copied from the firebase-js-sdk release.
- *  2. Create .github/scripts/compare-types/packages/<name>/config.ts
+ *  1. Create .github/scripts/compare-types/packages/<name>/config.ts
  *     documenting any known differences.
- *  3. Add an entry to the `packages` array below.
+ *  2. Add an entry to the `packages` array below, using `resolveFirebaseTypes`
+ *     with the relevant firebase sub-path export key (e.g. "firestore").
  */
 
+import fs from 'fs';
 import path from 'path';
 import type { PackageConfig } from './types';
 
@@ -20,13 +23,105 @@ import firestorePipelinesConfig from '../packages/firestore-pipelines/config';
 const SCRIPT_DIR = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(SCRIPT_DIR, '..', '..', '..');
 
+// ---------------------------------------------------------------------------
+// Firebase package resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Finds the root directory of the installed `firebase` npm package.
+ *
+ * Checks the repo root and packages/app workspace node_modules in order,
+ * to handle both hoisted and workspace-local installations.
+ *
+ * Throws a clear error if the package is not found so the user knows to run
+ * `yarn install` before running the comparison script.
+ */
+function findFirebaseRoot(): string {
+  const candidates = [
+    path.join(REPO_ROOT, 'node_modules', 'firebase'),
+    path.join(REPO_ROOT, 'packages', 'app', 'node_modules', 'firebase'),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, 'package.json'))) {
+      return candidate;
+    }
+  }
+
+  throw new Error(
+    'Could not find the `firebase` package in node_modules.\n' +
+    'Run `yarn install` from the repo root first, then re-run `yarn compare:types`.',
+  );
+}
+
+/**
+ * Recursively searches a package.json export entry object for a `types` or
+ * `typings` field, following conditional export nesting
+ * (e.g. `{ browser: { types: "..." }, default: { types: "..." } }`).
+ */
+function findTypesField(entry: unknown): string | null {
+  if (typeof entry === 'string') return null;
+  if (typeof entry !== 'object' || entry === null) return null;
+
+  const obj = entry as Record<string, unknown>;
+
+  if (typeof obj['types'] === 'string') return obj['types'];
+  if (typeof obj['typings'] === 'string') return obj['typings'];
+
+  for (const value of Object.values(obj)) {
+    const found = findTypesField(value);
+    if (found) return found;
+  }
+
+  return null;
+}
+
+/**
+ * Resolves the absolute path to the `.d.ts` types file for a given firebase
+ * sub-path export key (e.g. `"ai"`, `"firestore"`, `"firestore/pipelines"`).
+ *
+ * Reads the `exports` map from the installed `firebase/package.json` and
+ * extracts the `types` field for the requested export entry.
+ *
+ * The firebase version is determined by whatever is installed in node_modules,
+ * which tracks the version pinned in `packages/app/package.json`.
+ */
+function resolveFirebaseTypes(exportKey: string): string {
+  const firebaseRoot = findFirebaseRoot();
+  const pkgJsonPath = path.join(firebaseRoot, 'package.json');
+
+  const pkg = JSON.parse(fs.readFileSync(pkgJsonPath, 'utf8')) as {
+    version?: string;
+    exports?: Record<string, unknown>;
+  };
+
+  const entry = pkg.exports?.[`./${exportKey}`];
+  if (!entry) {
+    throw new Error(
+      `firebase@${pkg.version ?? '?'} has no "./${exportKey}" export.\n` +
+      `Check the exports map in ${pkgJsonPath}`,
+    );
+  }
+
+  const typesRelPath = findTypesField(entry);
+  if (!typesRelPath) {
+    throw new Error(
+      `No "types" field found in the "./${exportKey}" export entry of firebase@${pkg.version ?? '?'}.\n` +
+      `Export entry: ${JSON.stringify(entry, null, 2)}`,
+    );
+  }
+
+  return path.join(firebaseRoot, typesRelPath);
+}
+
 export interface PackageEntry {
   /** Short name used in reports (e.g. "remote-config"). */
   name: string;
   /**
-   * Paths to the firebase-js-sdk public type snapshot(s) (.d.ts).
-   * Kept in .github/scripts/compare-types/packages/<name>/.
-   * Exports from all files are merged (first file wins for duplicate names).
+   * Paths to the firebase-js-sdk public type files (.d.ts).
+   * Resolved at runtime from the installed `firebase` npm package via
+   * `resolveFirebaseTypes()`. Exports from all files are merged (first file
+   * wins for duplicate names).
    */
   firebaseSdkTypesPaths: string[];
   /**
@@ -58,7 +153,7 @@ export const packages: PackageEntry[] = [
   // {
   //   name: 'remote-config',
   //   firebaseSdkTypesPaths: [
-  //     path.join(SCRIPT_DIR, 'packages', 'remote-config', 'firebase-sdk.d.ts'),
+  //     resolveFirebaseTypes('remote-config'),
   //   ],
   //   rnFirebaseModularFiles: [
   //     path.join(rnDist('remote-config'), 'types', 'modular.d.ts'),
@@ -74,7 +169,7 @@ export const packages: PackageEntry[] = [
   {
     name: 'ai',
     firebaseSdkTypesPaths: [
-      path.join(SCRIPT_DIR, 'packages', 'ai', 'ai-sdk.d.ts'),
+      resolveFirebaseTypes('ai'),
     ],
     rnFirebaseModularFiles: [
       path.join(rnDist('ai'), 'index.d.ts'),
@@ -112,12 +207,7 @@ export const packages: PackageEntry[] = [
   {
     name: 'firestore',
     firebaseSdkTypesPaths: [
-      path.join(
-        SCRIPT_DIR,
-        'packages',
-        'firestore',
-        'firestore-js-sdk.d.ts',
-      ),
+      resolveFirebaseTypes('firestore'),
     ],
     rnFirebaseModularFiles: [
       path.join(rnDist('firestore'), 'types', 'firestore.d.ts'),
@@ -154,12 +244,7 @@ export const packages: PackageEntry[] = [
   {
     name: 'firestore-pipelines',
     firebaseSdkTypesPaths: [
-      path.join(
-        SCRIPT_DIR,
-        'packages',
-        'firestore-pipelines',
-        'pipelines.d.ts',
-      ),
+      resolveFirebaseTypes('firestore/pipelines'),
     ],
     rnFirebaseModularFiles: [
       path.join(rnDist('firestore'), 'pipelines', 'index.d.ts'),
