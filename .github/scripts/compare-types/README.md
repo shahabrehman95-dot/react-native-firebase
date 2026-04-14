@@ -17,10 +17,14 @@ Every difference must have an entry in the package's `config.ts` explaining why 
 
 ## Prerequisites
 
-The RN Firebase package(s) must be built before running the script, because the script reads from the compiled `dist/typescript/lib/` files:
+1. **Install dependencies** — the script resolves Firebase JS SDK types directly from the installed `firebase` npm package. Run `yarn install` from the repo root so that `node_modules/firebase` is present.
+
+2. **Build the RN Firebase packages** — the script also reads compiled `dist/typescript/lib/` files from each RN Firebase package:
 
 ```sh
-yarn
+# from repo root
+yarn install
+yarn build:all:build
 ```
 
 ## Running
@@ -83,14 +87,16 @@ src/
                 from undocumented differences, and detects stale config entries
                 whose APIs now match the SDK.
   report.ts     Formats results to the terminal with colour coding.
-  registry.ts   Package registry. Add new packages here.
+  registry.ts   Package registry. Add new packages here. Firebase JS SDK types are
+                resolved at runtime from node_modules/firebase via resolveFirebaseTypes().
   types.ts      TypeScript types for the config schema and internal data structures.
 
 packages/
   <package-name>/
-    firebase-sdk.d.ts   Snapshot of the firebase-js-sdk public types for this package.
     config.ts           Documented known differences for this package.
 ```
+
+Firebase JS SDK types are read directly from the installed `firebase` npm package in `node_modules`. The version compared is always the one pinned in `packages/app/package.json` — no manual type snapshots to maintain.
 
 ### Type shapes
 
@@ -107,17 +113,14 @@ Shapes are compared as normalised strings. Semantically equivalent types that ar
 
 ## Adding a new package
 
-### 1. Get the firebase-js-sdk public types
+### 1. Find the firebase sub-path export key
 
-Copy the public type declarations for the package from the firebase-js-sdk release into a new file:
+The Firebase JS SDK types are resolved from the installed `firebase` npm package via its `exports` map. Identify the export key for the package you want to add — it is the path after `firebase/` when importing in code, e.g.:
 
-```
-packages/<package-name>/firebase-sdk.d.ts
-```
+- `firebase/remote-config` → export key is `"remote-config"`
+- `firebase/firestore/pipelines` → export key is `"firestore/pipelines"`
 
-The file should contain only the **modular** (tree-shakeable) public exports — interfaces, type aliases, and `declare function` declarations. Strip internal/private types.
-
-> In the future this step will be automated: a CI job will clone the firebase-js-sdk, run `yarn && yarn build`, and extract the generated `.d.ts` files automatically.
+Pass this key to `resolveFirebaseTypes(exportKey)` in `registry.ts`.
 
 ### 2. Identify the RN Firebase modular files
 
@@ -186,7 +189,7 @@ import newPackageConfig from '../packages/<package-name>/config';
 {
   name: '<package-name>',
   firebaseSdkTypesPaths: [
-    path.join(SCRIPT_DIR, 'packages', '<package-name>', 'firebase-sdk.d.ts'),
+    resolveFirebaseTypes('<firebase-export-key>'),
   ],
   rnFirebaseModularFiles: [
     path.join(rnDist('<package-name>'), 'types', 'modular.d.ts'),
@@ -212,11 +215,13 @@ yarn compare:types
 
 ---
 
-## Updating a package's firebase-sdk snapshot
+## Updating to a new firebase-js-sdk version
 
-When a new firebase-js-sdk version ships with type changes:
+No manual snapshot update is needed. The script always reads types from the installed `firebase` package in `node_modules`.
 
-1. Copy the updated public types from `node_modules/@firebase/<package>/dist/index.d.ts` (or the equivalent built output) into `packages/<package-name>/firebase-sdk.d.ts`.
+When a new `firebase` version is pinned in `packages/app/package.json`:
+
+1. Run `yarn install` from the repo root to update `node_modules/firebase`.
 2. Run `yarn compare:types`.
 3. Any newly introduced differences will be flagged as undocumented. Either:
    - Update the RN Firebase types to match, or

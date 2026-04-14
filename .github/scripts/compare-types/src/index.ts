@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   for (const pkg of packages) {
     checkFilesExist(
       pkg.firebaseSdkTypesPaths,
-      `firebase-js-sdk snapshot(s) for "${pkg.name}"`,
+      `firebase-js-sdk types for "${pkg.name}" — run \`yarn install\` from the repo root first`,
     );
     checkFilesExist(
       pkg.rnFirebaseModularFiles,

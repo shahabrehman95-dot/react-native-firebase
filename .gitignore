@@ -589,5 +589,6 @@ vertexai-sdk-test-data*
 mocks-lookup.ts
 
 .nx/
-.claude/
+.claude/*
+!.claude/commands/
 .codex/
