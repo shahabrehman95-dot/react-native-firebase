@@ -153,6 +153,7 @@ modified  .github/scripts/compare-types/src/index.ts
 modified  .github/scripts/compare-types/README.md
 created   SUBMISSION_LOG.md
 ```
+<<<<<<< HEAD
 
 ---
 
@@ -324,3 +325,5 @@ created   .claude/commands/api-drift.md
 created   .claude/commands/release-hygiene.md
 modified  .gitignore
 ```
+=======
+>>>>>>> 98cd91217ae4ce2377a593a7152ce6786fd226fe
